@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e2a21">
+<title>Volunteer check-in</title>
+<style>
+  :root {
+    --ink: #0e2a21; --leaf: #17724a; --mist: #e8efeb; --paper: #fff; --muted: #4f665c;
+    --ok: #17724a; --warn: #f2b134; --bad: #b3261e;
+    --font: ui-rounded, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: var(--font); background: var(--ink); color: #fff; display: flex; flex-direction: column; height: 100dvh; }
+  [hidden] { display: none !important; }
+  button, input { font: inherit; }
+  :focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
+
+  header { display: flex; align-items: center; gap: 12px; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
+  .count { font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .count small { color: #b9d0c5; font-weight: 500; font-size: .85rem; margin-left: 6px; }
+  .tabs { margin-left: auto; display: flex; background: #1b3d31; border-radius: 12px; padding: 3px; }
+  .tabs button { background: none; border: 0; color: #b9d0c5; padding: 9px 16px; border-radius: 9px; font-weight: 650; cursor: pointer; }
+  .tabs button[aria-pressed="true"] { background: #fff; color: var(--ink); }
+
+  main { flex: 1; min-height: 0; position: relative; }
+  /* login */
+  #login { padding: 28px 20px; max-width: 26rem; margin: 0 auto; }
+  #login h1 { font-size: 1.5rem; margin: 0 0 6px; }
+  #login p { color: #b9d0c5; margin: 0 0 22px; }
+  label { display: block; font-weight: 600; margin: 14px 0 6px; }
+  input[type=text], input[type=password], input[type=search], input[type=email] {
+    width: 100%; padding: 14px; border-radius: 12px; border: 2px solid transparent; background: #fff; color: var(--ink); }
+  .primary { width: 100%; margin-top: 20px; padding: 15px; border: 0; border-radius: 12px; background: var(--warn); color: var(--ink); font-weight: 750; cursor: pointer; }
+  .msg { color: #ffb4ab; min-height: 1.4em; margin-top: 12px; }
+
+  /* scanner */
+  #scanView { position: absolute; inset: 0; background: #000; }
+  video { width: 100%; height: 100%; object-fit: cover; }
+  .reticle { position: absolute; left: 50%; top: 46%; width: min(68vw, 300px); aspect-ratio: 1; transform: translate(-50%, -50%);
+             border-radius: 24px; box-shadow: 0 0 0 100vmax rgba(14,42,33,.55); border: 3px solid #fff; pointer-events: none; }
+  .scanhint { position: absolute; left: 0; right: 0; bottom: calc(24px + env(safe-area-inset-bottom)); text-align: center; padding: 0 24px; color: #fff; text-shadow: 0 1px 4px #000; }
+  #camError { position: absolute; inset: 0; padding: 32px 24px; background: var(--ink); text-align: center; }
+
+  /* search */
+  #searchView { position: absolute; inset: 0; background: var(--mist); color: var(--ink); overflow-y: auto; padding: 14px 16px calc(24px + env(safe-area-inset-bottom)); }
+  #results { list-style: none; margin: 14px 0 0; padding: 0; }
+  #results li { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 10px; display: flex; gap: 12px; align-items: center; }
+  .who { flex: 1; min-width: 0; }
+  .who b { display: block; overflow-wrap: anywhere; }
+  .who span { display: block; color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+  .who .done { color: var(--ok); font-weight: 650; }
+  .act { border: 0; border-radius: 10px; padding: 11px 14px; font-weight: 700; cursor: pointer; background: var(--leaf); color: #fff; }
+  .act.undo { background: #dfe8e3; color: var(--ink); }
+  .empty { color: var(--muted); text-align: center; margin-top: 28px; }
+  details { margin-top: 18px; background: #fff; border-radius: 14px; padding: 14px; }
+  summary { font-weight: 650; cursor: pointer; }
+  .tools { margin-top: 18px; display: flex; gap: 14px; flex-wrap: wrap; font-size: .9rem; }
+  .tools a, .tools button { color: var(--leaf); background: none; border: 0; padding: 0; text-decoration: underline; cursor: pointer; }
+
+  /* full-screen result */
+  #result { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; padding: 24px; cursor: pointer; }
+  #result.ok { background: var(--ok); color: #fff; }
+  #result.already { background: var(--warn); color: var(--ink); }
+  #result.invalid, #result.error { background: var(--bad); color: #fff; }
+  #result .icon { font-size: 5.5rem; line-height: 1; margin-bottom: 12px; }
+  #result h2 { margin: 0; font-size: 2.4rem; line-height: 1.15; overflow-wrap: anywhere; }
+  #result p { margin: 10px 0 0; font-size: 1.15rem; }
+  #result small { margin-top: 28px; opacity: .8; }
+  @media (prefers-reduced-motion: no-preference) { #result { animation: pop .12s ease-out; } @keyframes pop { from { opacity: 0; } } }
+</style>
+</head>
+<body>
+<header id="bar" hidden>
+  <div class="count" aria-live="polite"><span id="done">0</span> / <span id="total">0</span><small>checked in</small></div>
+  <div class="tabs" role="group" aria-label="Mode">
+    <button id="tabScan" type="button" aria-pressed="true">Scan</button>
+    <button id="tabSearch" type="button" aria-pressed="false">Search</button>
+  </div>
+</header>
+
+<main>
+  <section id="login" hidden>
+    <h1 id="loginTitle">Volunteer check-in</h1>
+    <p>Sign in to start scanning passes.</p>
+    <label for="vname">Your name</label>
+    <input id="vname" type="text" autocomplete="name" placeholder="So we know who checked people in">
+    <label for="pass">Volunteer passcode</label>
+    <input id="pass" type="password" autocomplete="current-password">
+    <button class="primary" id="loginBtn" type="button">Sign in</button>
+    <div class="msg" id="loginMsg" role="alert"></div>
+  </section>
+
+  <section id="scanView" hidden>
+    <video id="video" playsinline muted></video>
+    <div class="reticle"></div>
+    <div class="scanhint">Hold the attendee's QR code inside the frame</div>
+    <div id="camError" hidden>
+      <h2>Camera isn't available</h2>
+      <p id="camMsg"></p>
+      <p>You can still check people in with Search.</p>
+    </div>
+  </section>
+
+  <section id="searchView" hidden>
+    <label for="q" style="margin-top:0">Find by name or email</label>
+    <input id="q" type="search" autocomplete="off" placeholder="Start typing">
+    <ul id="results"></ul>
+    <p class="empty" id="searchEmpty" hidden>No match. Check the spelling, or add them as a walk-in below.</p>
+    <details id="walkin">
+      <summary>Not on the list? Add a walk-in</summary>
+      <label for="wname">Full name</label>
+      <input id="wname" type="text" autocomplete="off">
+      <label for="wemail">Email (optional)</label>
+      <input id="wemail" type="email" autocomplete="off">
+      <button class="primary" id="wBtn" type="button">Add and check in</button>
+      <div class="msg" id="wMsg" role="alert"></div>
+    </details>
+    <div class="tools"><a href="/api/export.csv">Download attendance CSV</a></div>
+  </section>
+</main>
+
+<div id="result" hidden role="status" aria-live="assertive"></div>
+
+<canvas id="work" hidden></canvas>
+<script src="/static/vendor/jsQR.js"></script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var mode = "scan", busy = false, stream = null, scanTimer = null, hideTimer = null;
+  var lastToken = "", lastAt = 0;
+
+  /* ---------- helpers ---------- */
+  function api(path, opts) {
+    opts = opts || {};
+    opts.credentials = "same-origin";
+    if (opts.body && typeof opts.body !== "string") {
+      opts.body = JSON.stringify(opts.body); opts.headers = { "Content-Type": "application/json" };
+    }
+    return fetch(path, opts).then(function (r) {
+      if (r.status === 401 && path !== "/api/login") { showLogin(); throw new Error("auth"); }
+      return r.json().then(function (j) { if (!r.ok) throw new Error(j.detail || "Request failed"); return j; });
+    });
+  }
+  function timeText(iso) {
+    if (!iso) return "";
+    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  function setStats(s) { if (s) { $("done").textContent = s.checked_in; $("total").textContent = s.total; } }
+  function extractToken(text) {
+    text = String(text).trim();
+    var m = text.match(/\/pass\/([A-Za-z0-9_-]+)\/?$/);
+    return m ? m[1] : text;
+  }
+  var audioCtx;
+  function beep(freqs) {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      var t = audioCtx.currentTime;
+      freqs.forEach(function (f, i) {
+        var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.value = f; o.connect(g); g.connect(audioCtx.destination);
+        g.gain.setValueAtTime(.15, t + i * .14); g.gain.exponentialRampToValueAtTime(.001, t + i * .14 + .12);
+        o.start(t + i * .14); o.stop(t + i * .14 + .13);
+      });
+    } catch (e) {}
+  }
+
+  /* ---------- views ---------- */
+  function show(view) {
+    $("login").hidden = view !== "login";
+    $("scanView").hidden = view !== "scan";
+    $("searchView").hidden = view !== "search";
+    $("bar").hidden = view === "login";
+  }
+  function setMode(m) {
+    mode = m;
+    $("tabScan").setAttribute("aria-pressed", m === "scan");
+    $("tabSearch").setAttribute("aria-pressed", m === "search");
+    show(m);
+    if (m === "scan") startCamera(); else { stopCamera(); $("q").focus(); }
+  }
+  function showLogin() { stopCamera(); show("login"); }
+
+  /* ---------- result overlay ---------- */
+  function flash(kind, icon, title, line, ms) {
+    var el = $("result");
+    clearTimeout(hideTimer);
+    el.className = kind;
+    el.innerHTML = "";
+    var i = document.createElement("div"); i.className = "icon"; i.textContent = icon;
+    var h = document.createElement("h2"); h.textContent = title;
+    el.append(i, h);
+    if (line) { var p = document.createElement("p"); p.textContent = line; el.append(p); }
+    var s = document.createElement("small"); s.textContent = "Tap to scan the next code"; el.append(s);
+    el.hidden = false; busy = true;
+    hideTimer = setTimeout(dismiss, ms);
+  }
+  function dismiss() { clearTimeout(hideTimer); $("result").hidden = true; busy = false; }
+  $("result").addEventListener("click", dismiss);
+
+  function showOutcome(res) {
+    setStats(res.stats);
+    var p = res.person;
+    if (res.status === "ok") {
+      flash("ok", "\u2713", p.name, "Checked in", 1800); beep([880, 1175]);
+      if (navigator.vibrate) navigator.vibrate(80);
+    } else if (res.status === "already") {
+      var by = p.checked_in_by ? " by " + p.checked_in_by : "";
+      flash("already", "!", p.name, "Already checked in at " + timeText(p.checked_in_at) + by, 3500); beep([440, 440]);
+      if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
+    } else {
+      flash("invalid", "\u2715", "Not recognised", "This code isn't on the guest list. Try Search.", 3500); beep([220]);
+      if (navigator.vibrate) navigator.vibrate(300);
+    }
+  }
+
+  /* ---------- scanning ---------- */
+  function startCamera() {
+    if (stream) { loop(); return; }
+    $("camError").hidden = true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      $("camError").hidden = false;
+      $("camMsg").textContent = "Camera access needs a secure (https) connection.";
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then(function (s) { stream = s; $("video").srcObject = s; return $("video").play(); })
+      .then(loop)
+      .catch(function () {
+        $("camError").hidden = false;
+        $("camMsg").textContent = "Allow camera access in your browser settings, then reload this page.";
+      });
+  }
+  function stopCamera() {
+    clearTimeout(scanTimer);
+    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+  }
+  function loop() {
+    clearTimeout(scanTimer);
+    if (mode !== "scan" || !stream) return;
+    var v = $("video");
+    if (!busy && v.readyState === v.HAVE_ENOUGH_DATA && v.videoWidth) {
+      var scale = Math.min(1, 640 / v.videoWidth), w = Math.round(v.videoWidth * scale), h = Math.round(v.videoHeight * scale);
+      var c = $("work"); c.width = w; c.height = h;
+      var ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(v, 0, 0, w, h);
+      var code = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" });
+      if (code && code.data) handleScan(extractToken(code.data));
+    }
+    scanTimer = setTimeout(loop, 120);
+  }
+  function handleScan(token) {
+    var now = Date.now();
+    if (token === lastToken && now - lastAt < 4000) return;
+    lastToken = token; lastAt = now; busy = true;
+    api("/api/checkin", { method: "POST", body: { token: token } })
+      .then(showOutcome)
+      .catch(function (e) {
+        if (e.message === "auth") { busy = false; return; }
+        lastToken = "";
+        flash("error", "!", "No connection", "Couldn't reach the server. Scan again in a moment.", 2500);
+      });
+  }
+
+  /* ---------- search ---------- */
+  var searchTimer;
+  $("q").addEventListener("input", function () {
+    clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 250);
+  });
+  function runSearch() {
+    var q = $("q").value.trim();
+    if (q.length < 2) { $("results").innerHTML = ""; $("searchEmpty").hidden = true; return; }
+    api("/api/search?q=" + encodeURIComponent(q)).then(function (d) {
+      renderResults(d.results); $("searchEmpty").hidden = d.results.length > 0;
+    }).catch(function () {});
+  }
+  function renderResults(list) {
+    var ul = $("results"); ul.innerHTML = "";
+    list.forEach(function (p) {
+      var li = document.createElement("li");
+      var who = document.createElement("div"); who.className = "who";
+      var b = document.createElement("b"); b.textContent = p.name;
+      var e = document.createElement("span"); e.textContent = p.email || "No email";
+      who.append(b, e);
+      if (p.checked_in) {
+        var d = document.createElement("span"); d.className = "done";
+        d.textContent = "Checked in " + timeText(p.checked_in_at) + (p.checked_in_by ? " by " + p.checked_in_by : "");
+        who.append(d);
+      }
+      var btn = document.createElement("button"); btn.type = "button";
+      btn.className = "act" + (p.checked_in ? " undo" : "");
+      btn.textContent = p.checked_in ? "Undo" : "Check in";
+      btn.onclick = function () {
+        if (p.checked_in && !confirm("Undo check-in for " + p.name + "?")) return;
+        btn.disabled = true;
+        api(p.checked_in ? "/api/undo/" + p.id : "/api/checkin/" + p.id, { method: "POST" })
+          .then(function (res) { setStats(res.stats); runSearch(); })
+          .catch(function () { btn.disabled = false; });
+      };
+      li.append(who, btn); ul.append(li);
+    });
+  }
+  $("wBtn").addEventListener("click", function () {
+    var name = $("wname").value.trim();
+    if (!name) { $("wMsg").textContent = "Enter a name."; return; }
+    $("wMsg").textContent = "";
+    api("/api/walkin", { method: "POST", body: { name: name, email: $("wemail").value.trim() } })
+      .then(function (res) { setStats(res.stats); $("wname").value = ""; $("wemail").value = ""; $("walkin").open = false;
+        flash("ok", "\u2713", res.person.name, "Walk-in added and checked in", 1800); beep([880, 1175]); })
+      .catch(function (e) { $("wMsg").textContent = e.message; });
+  });
+
+  /* ---------- login ---------- */
+  function doLogin() {
+    $("loginMsg").textContent = "";
+    api("/api/login", { method: "POST", body: { passcode: $("pass").value, name: $("vname").value } })
+      .then(function () { try { localStorage.setItem("vname", $("vname").value); } catch (e) {} $("pass").value = ""; boot(); })
+      .catch(function (e) { $("loginMsg").textContent = e.message; });
+  }
+  $("loginBtn").addEventListener("click", doLogin);
+  $("pass").addEventListener("keydown", function (e) { if (e.key === "Enter") doLogin(); });
+  $("tabScan").addEventListener("click", function () { setMode("scan"); });
+  $("tabSearch").addEventListener("click", function () { setMode("search"); });
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) stopCamera(); else if (mode === "scan" && !$("scanView").hidden) startCamera();
+  });
+  setInterval(function () { if (!$("bar").hidden) api("/api/stats").then(setStats).catch(function () {}); }, 10000);
+
+  /* ---------- boot ---------- */
+  function boot() {
+    api("/api/stats").then(function (s) {
+      setStats(s); document.title = s.event_name + " check-in"; setMode("scan");
+    }).catch(function () {
+      try { $("vname").value = localStorage.getItem("vname") || ""; } catch (e) {}
+      showLogin();
+    });
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
