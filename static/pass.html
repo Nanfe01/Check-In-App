@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your summit pass</title>
+<style>
+  :root {
+    --ink: #0e2a21; --leaf: #17724a; --mist: #e8efeb; --paper: #ffffff; --muted: #4f665c;
+    --font: ui-rounded, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body { font-family: var(--font); background: var(--mist); color: var(--ink); }
+  .band { background: var(--ink); color: #fff; padding: calc(28px + env(safe-area-inset-top)) 24px 96px; }
+  .band h1 { margin: 0; font-size: 1.35rem; font-weight: 700; line-height: 1.25; max-width: 28rem; margin-inline: auto; }
+  .band p { margin: 6px auto 0; color: #b9d0c5; font-size: .95rem; max-width: 28rem; }
+  .card { background: var(--paper); max-width: 26rem; margin: -72px auto 0; border-radius: 20px; padding: 28px 24px 24px;
+          text-align: center; box-shadow: 0 10px 30px rgba(14,42,33,.18); position: relative; }
+  .card::before, .card::after { content: ""; position: absolute; top: 118px; width: 22px; height: 22px; background: var(--mist); border-radius: 50%; }
+  .card::before { left: -11px; } .card::after { right: -11px; }
+  .name { font-size: 1.9rem; font-weight: 750; line-height: 1.15; margin: 0 0 22px; overflow-wrap: anywhere; }
+  .qr { border-top: 2px dashed #cfdcd5; padding-top: 22px; }
+  canvas { width: min(100%, 300px); height: auto; aspect-ratio: 1; image-rendering: pixelated; }
+  .hint { color: var(--muted); font-size: .95rem; margin: 14px 0 0; line-height: 1.45; }
+  .status { margin-top: 14px; font-weight: 650; color: var(--leaf); }
+  button { margin-top: 18px; font: inherit; font-weight: 650; color: #fff; background: var(--leaf); border: 0; border-radius: 12px; padding: 14px 20px; width: 100%; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  .error { max-width: 26rem; margin: 40px auto; padding: 0 24px; text-align: center; }
+  .wrap { padding: 0 16px calc(32px + env(safe-area-inset-bottom)); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <header class="band"><h1 id="event"></h1><p id="details"></p></header>
+  <div class="wrap">
+    <main class="card">
+      <h2 class="name" id="name"></h2>
+      <div class="qr">
+        <canvas id="qr" width="400" height="400" role="img" aria-label="Your check-in QR code"></canvas>
+        <p class="hint">Show this code at the entrance. Turn your screen brightness up so it scans quickly.</p>
+        <p class="status" id="status" hidden>You are checked in.</p>
+        <button id="save" type="button">Save QR code as image</button>
+      </div>
+    </main>
+  </div>
+</div>
+<div id="missing" class="error" hidden>
+  <h1>We couldn't find this pass</h1>
+  <p>Check that you opened the full link from your email. If it still doesn't work, contact the organisers.</p>
+</div>
+
+<script src="/static/vendor/qrcode.js"></script>
+<script>
+(function () {
+  var token = location.pathname.split("/").filter(Boolean).pop();
+  function drawQR(canvas, text) {
+    var qr = qrcode(0, "M"); qr.addData(text); qr.make();
+    var n = qr.getModuleCount(), quiet = 4, cell = Math.floor(400 / (n + quiet * 2));
+    var size = cell * (n + quiet * 2);
+    canvas.width = canvas.height = size;
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "#000";
+    for (var r = 0; r < n; r++) for (var c = 0; c < n; c++)
+      if (qr.isDark(r, c)) ctx.fillRect((c + quiet) * cell, (r + quiet) * cell, cell, cell);
+  }
+  fetch("/api/pass/" + encodeURIComponent(token), { cache: "no-store" })
+    .then(function (r) { if (!r.ok) throw new Error("nf"); return r.json(); })
+    .then(function (p) {
+      document.title = p.event_name + " pass";
+      document.getElementById("event").textContent = p.event_name;
+      document.getElementById("details").textContent = p.event_details || "";
+      document.getElementById("name").textContent = p.name;
+      var canvas = document.getElementById("qr");
+      drawQR(canvas, p.token);
+      if (p.checked_in) document.getElementById("status").hidden = false;
+      document.getElementById("save").onclick = function () {
+        var a = document.createElement("a");
+        a.download = "summit-pass.png"; a.href = canvas.toDataURL("image/png"); a.click();
+      };
+      document.getElementById("app").hidden = false;
+    })
+    .catch(function () { document.getElementById("missing").hidden = false; });
+})();
+</script>
+</body>
+</html>
